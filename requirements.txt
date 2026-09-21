@@ -1,0 +1,23 @@
+# serving
+fastapi
+uvicorn[standard]
+python-multipart
+
+# audio + phonetic retrieval (same stack as wake2adapt)
+numpy
+soundfile
+soxr                      # wav resampling, no numba in the request path
+av                        # decodes browser webm/opus and mp4/aac uploads
+librosa                   # imported by wake2adapt/src/infer_qwen2.5_omni.py
+epitran
+panphon
+
+# ASR model (skip these if you only run with --no-asr)
+torch
+accelerate
+transformers>=4.52,<5     # Qwen2.5-Omni landed in 4.52; 5.x breaks the repo's disable_talker()
+torchvision               # pulled in by qwen_omni_utils
+qwen-omni-utils
+
+# optional: --quant int8 / nf4 (needs a GPU with compute capability >= 7.5)
+bitsandbytes

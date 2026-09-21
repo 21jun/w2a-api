@@ -1,0 +1,11 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+
+# cloned separately, see README
+/wake2adapt/
+/w2a-demo/
+
+# local environment
+.env*
