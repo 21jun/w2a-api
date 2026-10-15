@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "/home/user/w2a-api/server.py", line 51, in <module>
+    epi = epitran.Epitran("kor-Hang")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/epitran/_epitran.py", line 60, in __init__
+    self.ft = panphon.featuretable.FeatureTable()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/panphon/featuretable.py", line 62, in __init__
+    self.segments, self.seg_dict, self.names = self._read_bases(bases_fn, self.weights)
+                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/panphon/featuretable.py", line 94, in _read_bases
+    segments = [
+               ^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/panphon/featuretable.py", line 94, in <listcomp>
+    segments = [
+               ^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/pandas/core/frame.py", line 1586, in iterrows
+    s = klass(v, index=columns, name=k).__finalize__(self)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/w2a-api/.venv/lib/python3.11/site-packages/pandas/core/generic.py", line 6160, in __finalize__
+    for name in set(self._metadata) & set(other._metadata):
+                ^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt

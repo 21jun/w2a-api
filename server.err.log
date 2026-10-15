@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "C:\Python312\Lib\multiprocessing\connection.py", line 317, in _recv_bytes
+    ov, err = _winapi.ReadFile(self._handle, bsize,
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+BrokenPipeError: [WinError 109] 파이프가 끝났습니다
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\yeonsu\w2a\w2a-api\server.py", line 594, in <module>
+    main()
+  File "C:\Users\yeonsu\w2a\w2a-api\server.py", line 587, in main
+    ASR.start()
+  File "C:\Users\yeonsu\w2a\w2a-api\asr_worker.py", line 97, in start
+    self._start()
+  File "C:\Users\yeonsu\w2a\w2a-api\asr_worker.py", line 87, in _start
+    if not parent.poll(self.startup_timeout_s) or parent.recv()[0] != "ready":
+                                                  ^^^^^^^^^^^^^
+  File "C:\Python312\Lib\multiprocessing\connection.py", line 250, in recv
+    buf = self._recv_bytes()
+          ^^^^^^^^^^^^^^^^^^
+  File "C:\Python312\Lib\multiprocessing\connection.py", line 337, in _recv_bytes
+    raise EOFError
+EOFError

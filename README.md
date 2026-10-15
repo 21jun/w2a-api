@@ -37,6 +37,75 @@ Useful flags: `--model_path` (default `Qwen/Qwen2.5-Omni-7B`, also `W2A_MODEL`),
 `{domain}_200.csv` lexicon; without it the 200 entities per domain are rebuilt from the
 `answer` fields in `wake2adapt/L2-KPNS-jsonl/`).
 
+## Audio validation and inference deadlines
+
+The target and optional reference must decode successfully to a nonempty, finite mono
+waveform before ASR starts. Empty uploads, undecodable/unsupported files, zero-sample audio,
+and NaN/Inf samples return HTTP 400 with `detail.code: "INVALID_AUDIO"`, a user-facing
+`detail.message`, and the failing `detail.filename`. Soundfile falls back to PyAV for browser
+formats. A decoder may accept partially damaged files; this is a decodability check, not a
+guarantee of bit-for-bit file integrity. Valid silence/noise is still passed to the model.
+
+ASR runs in a persistent spawned GPU process. `--asr_timeout_s` defaults to 10 seconds per
+call, excluding upload, decoding, model loading, and retrieval. On expiry, the process is
+terminated (with a kill fallback) and HTTP 504 / `ASR_TIMEOUT` is returned; process cleanup
+can add up to approximately two seconds. The failed audio is not automatically retried.
+The model reloads in the background. Calls during another inference or reload return
+HTTP 503 / `ASR_BUSY`; an unavailable model returns `ASR_UNAVAILABLE`. Worker failures
+return `ASR_WORKER_FAILED` and also trigger reload. Startup/reload has a separate
+`--asr_startup_timeout_s` limit (default 300 seconds); failed recovery leaves ASR unavailable
+until the server is restarted. `/health.asr_loaded` reports worker readiness.
+
+```bash
+python server.py --asr_timeout_s 10 --asr_startup_timeout_s 300
+python -X utf8 -m unittest discover -s tests -v
+```
+
+The browser STT proxies preserve the new structured error messages, codes, and HTTP statuses.
+The 10-second value is provisional, not derived from measured production percentiles.
+Output validation, hallucination detection, and re-transcription are not implemented.
+The ASR no longer removes a matching reference-text prefix from the transcript; it still
+strips the model's `Transcription:` formatting prefix.
+
+`POST /cancel` accepts `request_id` and signals cancellation for that ID. ASR polls the
+signal every 50 ms; cancellation terminates its GPU worker and reloads the model, with
+the interrupted request returning HTTP 499 / `REQUEST_CANCELLED`. This response code
+also applies to cancelled retrieval. The cancel response's `was_running` indicates
+whether an active stage was found, not whether worker cleanup has already completed.
+Cancellation received before upload finishes or between ASR and retrieval is remembered
+for five minutes (bounded to 4096 IDs). During decoding, cancellation is checked as soon
+as decoding returns, before the model is called. Use a new ID per analysis and reuse it
+for that analysis's ASR and retrieval stages. IDs are coordinated within one API process.
+
+`POST /transcribe` now accepts `request_id` and `with_retrieval=false` (ASR only), and
+`POST /retrieve` accepts the same `request_id`. The study UI forwards the ID to both
+stages, avoiding duplicate retrieval after ASR. Its cancel action now reaches either stage.
+
+DB search uses `--retrieval_timeout_s` (default 10 seconds), for both `/retrieve` and
+retrieval inside `/transcribe`. It checks cancellation and a monotonic deadline before
+and after transliteration, between entries, and after each edit-distance calculation.
+On expiry it stops searching and returns HTTP 504 / `RETRIEVAL_TIMEOUT`, without partial
+results. An individual transliteration/distance operation must finish before a checkpoint
+can interrupt it. Search cancellation/timeout does
+not restart the GPU model. Empty or whitespace-only transcripts are rejected before
+phonetic search with HTTP 400 / `EMPTY_TRANSCRIPT`.
+
+The study UI does not issue a DB request for an empty ASR result: it immediately shows
+a retrieval failure. Nonempty transcripts get at most two retrieval requests, using the
+same ASR text; cancellation prevents retry. Each server search has a 10-second default
+deadline, so two timed-out searches take approximately 20 seconds plus transport overhead.
+After both requests fail, the UI displays a retrieval error and keeps the existing audio
+and transcript rather than counting it as a failed pronunciation or restarting ASR.
+
+Trial logging runs independently from the analysis result and target progression. Each
+bundle contains the original row and audio blobs, is placed in a browser IndexedDB outbox,
+and is sent up to twice per delivery pass. Failed bundles remain queued and retry every
+60 seconds, when connectivity returns, on page reload, or via the retry button. The server
+deduplicates by session/target/attempt, including when a prior write succeeded but its
+response was lost. Logging failure never requires re-recording. If browser storage is
+unavailable/full, bundles remain in memory and the UI warns against closing the page.
+IndexedDB persistence still depends on browser storage availability and retention.
+
 ## VRAM and quantization
 
 Serving only needs the *thinker* (LLM + audio encoder). The server therefore skips the
@@ -86,6 +155,7 @@ the offline pipeline.
 | `GET` | `/lexicon?domain=roads&limit=20` | peek at the entity lexicon and its IPA |
 | `POST` | `/transcribe` | audio -> ASR -> top-k retrieval |
 | `POST` | `/retrieve` | text -> top-k retrieval (no GPU, for debugging the retriever) |
+| `POST` | `/cancel` | cancel ASR/retrieval by multipart `request_id` |
 
 `/transcribe` is multipart form data:
 
@@ -96,6 +166,8 @@ the offline pipeline.
 | `top_k` | no | 10 | |
 | `ref_audio` | no | | 1-shot reference from the same speaker -> turns on ASR adaptation |
 | `ref_text` | no | `""` | the reference transcription that goes with `ref_audio` |
+| `request_id` | no | generated | cancellation ID, 1–64 word characters or hyphens |
+| `with_retrieval` | no | `true` | `false` returns ASR only; call `/retrieve` separately |
 
 ```bash
 # zero-shot
