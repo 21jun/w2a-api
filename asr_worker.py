@@ -4,8 +4,10 @@ from __future__ import annotations
 import logging
 import math
 import multiprocessing as mp
+import sys
 import threading
 import time
+import traceback
 
 log = logging.getLogger(__name__)
 
@@ -19,10 +21,12 @@ class ASRServiceError(Exception):
 
 def model_worker(connection, config):
     # CUDA is initialized only in the spawned process, never forked.
+    ready = False
     try:
         from server import load_asr
         pipeline = load_asr(config)
         connection.send(("ready", None))
+        ready = True
         while True:
             payload = connection.recv()
             started = time.monotonic()
@@ -33,10 +37,18 @@ def model_worker(connection, config):
                 log.exception("ASR inference failed")
                 connection.send(("error", None))
                 return  # Reset model state after inference errors, too.
-    except EOFError:
-        pass
-    except Exception:
-        log.exception("ASR worker failed")
+    except BaseException as exc:
+        if not ready:
+            # Send the original startup exception before closing the pipe. Parent stderr
+            # may be redirected or the child may exit before its logs are flushed.
+            detail = traceback.format_exc()
+            try:
+                connection.send(("startup_error", detail))
+            except (EOFError, OSError):
+                pass
+            log.error("ASR model startup failed:\n%s", detail)
+        elif not isinstance(exc, EOFError):
+            log.exception("ASR worker failed")
     finally:
         connection.close()
 
@@ -84,8 +96,24 @@ class ASRWorker:
         try:
             self.process.start()
             child.close()
-            if not parent.poll(self.startup_timeout_s) or parent.recv()[0] != "ready":
-                raise RuntimeError("ASR model startup timed out or failed")
+            try:
+                if not parent.poll(self.startup_timeout_s):
+                    raise RuntimeError(f"ASR model startup exceeded {self.startup_timeout_s:g} seconds.")
+                status, detail = parent.recv()
+            except (EOFError, OSError) as exc:
+                # A native crash or spawn/bootstrap failure cannot send an error message.
+                self.process.join(timeout=0.5)
+                exitcode = self.process.exitcode
+                code = "not available yet" if exitcode is None else f"{exitcode} (0x{exitcode & 0xffffffff:08X})"
+                raise RuntimeError(
+                    f"ASR worker exited before reporting ready. Exit code: {code}. "
+                    f"Python: {sys.executable}. Check earlier child-process stderr for "
+                    "spawn/import errors or native DLL/CUDA failures."
+                ) from exc
+            if status == "startup_error":
+                raise RuntimeError(f"ASR model startup failed in {sys.executable}:\n{detail}")
+            if status != "ready":
+                raise RuntimeError(f"Unexpected ASR startup response: {status!r}")
             self.ready = True
         except Exception:
             child.close()

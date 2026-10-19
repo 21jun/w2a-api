@@ -1,24 +1,5 @@
-Traceback (most recent call last):
-  File "C:\Python312\Lib\multiprocessing\connection.py", line 317, in _recv_bytes
-    ov, err = _winapi.ReadFile(self._handle, bsize,
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-BrokenPipeError: [WinError 109] 파이프가 끝났습니다
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "C:\Users\yeonsu\w2a\w2a-api\server.py", line 594, in <module>
-    main()
-  File "C:\Users\yeonsu\w2a\w2a-api\server.py", line 587, in main
-    ASR.start()
-  File "C:\Users\yeonsu\w2a\w2a-api\asr_worker.py", line 97, in start
-    self._start()
-  File "C:\Users\yeonsu\w2a\w2a-api\asr_worker.py", line 87, in _start
-    if not parent.poll(self.startup_timeout_s) or parent.recv()[0] != "ready":
-                                                  ^^^^^^^^^^^^^
-  File "C:\Python312\Lib\multiprocessing\connection.py", line 250, in recv
-    buf = self._recv_bytes()
-          ^^^^^^^^^^^^^^^^^^
-  File "C:\Python312\Lib\multiprocessing\connection.py", line 337, in _recv_bytes
-    raise EOFError
-EOFError
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]Loading checkpoint shards:  20%|██        | 1/5 [00:08<00:33,  8.39s/it]Loading checkpoint shards:  40%|████      | 2/5 [00:17<00:26,  8.78s/it]Loading checkpoint shards:  60%|██████    | 3/5 [00:27<00:18,  9.19s/it]Loading checkpoint shards:  80%|████████  | 4/5 [00:32<00:07,  7.51s/it]Loading checkpoint shards: 100%|██████████| 5/5 [00:32<00:00,  6.41s/it]
+INFO:     Started server process [26664]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)

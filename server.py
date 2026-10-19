@@ -247,6 +247,14 @@ def load_asr(cfg: ServerConfig):
     """Load wake2adapt's pipeline by path (the filename has a '.' in it, so no plain import)."""
     import torch
 
+    if str(cfg.device).startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(
+            f"Requested {cfg.device}, but CUDA is unavailable in {sys.executable} "
+            f"(torch={torch.__version__}, built CUDA={torch.version.cuda}). "
+            "Use a Python environment with CUDA-enabled PyTorch and a compatible NVIDIA GPU/driver. "
+            "Use --no-asr only if you need retrieval without ASR."
+        )
+
     infer_py = cfg.repo_root / "src" / "infer_qwen2.5_omni.py"
     if not infer_py.exists():
         raise FileNotFoundError(f"{infer_py} not found -- pass --repo_root")
@@ -563,8 +571,8 @@ def main():
                    help="hard deadline per ASR call, excluding model load and retrieval (default: 10 s)")
     p.add_argument("--asr_startup_timeout_s", type=float, default=300.0,
                    help="model startup/reload deadline (default: 300 s)")
-    p.add_argument("--retrieval_timeout_s", type=float, default=10.0,
-                   help="phonetic DB search deadline (default: 10 s)")
+    p.add_argument("--retrieval_timeout_s", type=float, default=20.0,
+                   help="phonetic DB search deadline (default: 20 s)")
     p.add_argument("--quant", default="none", choices=["none", "int8", "nf4"],
                    help="bitsandbytes weight quantization; nf4 fits an 11 GB card "
                         "(needs compute capability >= 7.5)")

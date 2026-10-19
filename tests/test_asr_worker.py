@@ -1,8 +1,23 @@
 import time
 import threading
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
-from asr_worker import ASRServiceError, ASRWorker
+from asr_worker import ASRServiceError, ASRWorker, model_worker
+
+
+def exits_before_ready(connection, config):
+    connection.close()
+
+
+def reports_startup_error(connection, config):
+    connection.send(("startup_error", "ModuleNotFoundError: No module named 'audioread'"))
+    connection.close()
+
+
+def stalled_startup(connection, config):
+    time.sleep(60)
 
 
 def fake_worker(connection, config):
@@ -21,6 +36,39 @@ def fake_worker(connection, config):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_startup_error_reaches_parent_and_cleans_up(self):
+        worker = ASRWorker(None, startup_timeout_s=5, worker_target=reports_startup_error)
+        self.addCleanup(worker.close)
+        with self.assertRaisesRegex(RuntimeError, "ModuleNotFoundError.*audioread"):
+            worker.start()
+        self.assertFalse(worker.ready)
+        self.assertIsNone(worker.process)
+        self.assertIsNone(worker.connection)
+
+    def test_early_exit_reports_exit_code_instead_of_raw_eof(self):
+        worker = ASRWorker(None, startup_timeout_s=5, worker_target=exits_before_ready)
+        self.addCleanup(worker.close)
+        with self.assertRaisesRegex(RuntimeError, "exited before reporting ready.*Exit code: 0"):
+            worker.start()
+        self.assertIsNone(worker.process)
+
+    def test_startup_timeout_remains_distinct(self):
+        worker = ASRWorker(None, startup_timeout_s=0.15, worker_target=stalled_startup)
+        self.addCleanup(worker.close)
+        with self.assertRaisesRegex(RuntimeError, "startup exceeded"):
+            worker.start()
+        self.assertIsNone(worker.process)
+
+    def test_model_worker_sends_original_loading_exception(self):
+        connection = SimpleNamespace(send=unittest.mock.Mock(), close=unittest.mock.Mock())
+        fake_server = SimpleNamespace(load_asr=unittest.mock.Mock(side_effect=ImportError("missing model dependency")))
+        with patch.dict("sys.modules", {"server": fake_server}), patch("asr_worker.log"):
+            model_worker(connection, None)
+        status, detail = connection.send.call_args.args[0]
+        self.assertEqual(status, "startup_error")
+        self.assertIn("ImportError: missing model dependency", detail)
+        connection.close.assert_called_once()
+
     def worker(self, timeout=1):
         worker = ASRWorker(None, timeout, 5, worker_target=fake_worker)
         self.addCleanup(worker.close)

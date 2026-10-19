@@ -24,6 +24,46 @@ export HF_HOME=/path/with/room/for/21GB   # on the KAIST box: source ../env.sh
 
 ## Run
 
+On Windows with an NVIDIA GPU, use a separate Windows environment. The existing `.venv`
+may be a Linux checkout and is left intact:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-windows.ps1
+.\.venv-win\Scripts\python.exe -X utf8 -m unittest discover -s tests -v
+.\start-study.cmd
+```
+
+To stop the API and its GPU worker, run `.\end-study.cmd`. To preview the
+processes and cache directories affected, run `.\end-study.cmd -WhatIf`.
+This removes Python bytecode caches and `.cache/wheels`, while preserving
+the downloaded model in `.cache/huggingface`, server logs, recordings, and study data.
+The frontend has its own `w2a-user-study\end-study.cmd`; run both commands
+when ending the complete local study environment.
+
+`setup-windows.ps1` installs CUDA 12.6 PyTorch 2.8 / torchvision 0.23 / torchaudio 2.8,
+Transformers 4.57.6, and the tested versions in `requirements-windows.lock.txt`
+(falling back to `requirements-windows.txt` if the lock file is missing), then checks
+GPU allocation, then prefetches the model (use `-SkipModelDownload` to skip that step).
+`start-study.cmd` uses this project Python explicitly, sets UTF-8, and
+caches model files in `.cache/huggingface` unless `HF_HOME` is already configured.
+The default is local port 8000, int8 quantization, bfloat16, and GPU `cuda:0`.
+The launcher refuses a second project instance even while the first is still loading.
+Reading the full lexicons and generating their IPA can take several minutes before
+the API starts listening; model downloads are cached separately.
+For a different port or lower-memory quantization, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-study.ps1 -Port 8000 -Quant nf4
+```
+
+The first model download can exceed the worker's startup deadline. Prefetch the checkpoint
+before launching in that case:
+
+```powershell
+$env:HF_HOME = Join-Path $PWD '.cache\huggingface'
+.\.venv-win\Scripts\python.exe -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen2.5-Omni-7B')"
+```
+
 ```bash
 .venv/bin/python server.py --port 8000                  # loads Qwen2.5-Omni-7B on cuda:0
 .venv/bin/python server.py --port 8000 --no-asr         # retriever only, no GPU
@@ -81,7 +121,7 @@ for that analysis's ASR and retrieval stages. IDs are coordinated within one API
 `POST /retrieve` accepts the same `request_id`. The study UI forwards the ID to both
 stages, avoiding duplicate retrieval after ASR. Its cancel action now reaches either stage.
 
-DB search uses `--retrieval_timeout_s` (default 10 seconds), for both `/retrieve` and
+DB search uses `--retrieval_timeout_s` (default 20 seconds), for both `/retrieve` and
 retrieval inside `/transcribe`. It checks cancellation and a monotonic deadline before
 and after transliteration, between entries, and after each edit-distance calculation.
 On expiry it stops searching and returns HTTP 504 / `RETRIEVAL_TIMEOUT`, without partial
@@ -92,8 +132,8 @@ phonetic search with HTTP 400 / `EMPTY_TRANSCRIPT`.
 
 The study UI does not issue a DB request for an empty ASR result: it immediately shows
 a retrieval failure. Nonempty transcripts get at most two retrieval requests, using the
-same ASR text; cancellation prevents retry. Each server search has a 10-second default
-deadline, so two timed-out searches take approximately 20 seconds plus transport overhead.
+same ASR text; cancellation prevents retry. Each server search has a 20-second default
+deadline, so two timed-out searches take approximately 40 seconds plus transport overhead.
 After both requests fail, the UI displays a retrieval error and keeps the existing audio
 and transcript rather than counting it as a failed pronunciation or restarting ASR.
 

@@ -9,6 +9,7 @@ soundfile
 soxr                      # wav resampling, no numba in the request path
 av                        # decodes browser webm/opus and mp4/aac uploads
 librosa                   # imported by wake2adapt/src/infer_qwen2.5_omni.py
+audioread                 # directly imported by qwen_omni_utils audio processing
 epitran
 panphon
 

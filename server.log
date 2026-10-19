@@ -2,3 +2,4 @@
 [lexicon] content: 16748 entities from C:\Users\yeonsu\w2a\L2-KPNS\metadata\lexicons\content.csv
 [lexicon] restaurants: 746525 entities from C:\Users\yeonsu\w2a\L2-KPNS\metadata\lexicons\restaurants.csv
 [lexicon] stations: 678 entities from C:\Users\yeonsu\w2a\L2-KPNS\metadata\lexicons\stations.csv
+[asr] loading Qwen/Qwen2.5-Omni-7B on cuda:0 (bfloat16, quant=int8) ...
