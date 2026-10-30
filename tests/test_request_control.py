@@ -69,7 +69,7 @@ class ControlTests(unittest.TestCase):
             raise ASRServiceError(499, "REQUEST_CANCELLED", "cancelled")
         asr = Mock()
         asr.run_asr.side_effect = run
-        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "REQUESTS", RequestRegistry()):
+        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "REQUESTS", RequestRegistry()):
             with TestClient(server.app) as client, ThreadPoolExecutor() as pool:
                 pending = pool.submit(client.post, "/transcribe", files={"audio": ("audio.wav", wav([0] * 160), "audio/wav")}, data={"request_id": "r1"})
                 self.assertTrue(entered.wait(3))
@@ -84,7 +84,7 @@ class ControlTests(unittest.TestCase):
         def transliterate(text):
             time.sleep(0.02)
             return "a"
-        with patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=0.001)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server.epi, "transliterate", side_effect=transliterate):
+        with patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=0.001, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server.epi, "transliterate", side_effect=transliterate):
             with TestClient(server.app) as client:
                 response = client.post("/retrieve", data={"text": "hello"})
         self.assertEqual(response.status_code, 504)
@@ -98,7 +98,7 @@ class ControlTests(unittest.TestCase):
             return 0
         entry = {"ipa": "a", "entity_id": "1", "entity": "word", "romanized": ""}
         entries = {str(i): entry for i in range(100)}
-        with patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30)), patch.object(server, "LEXICON", {"roads": entries}), patch.object(server, "REQUESTS", RequestRegistry()), patch.object(server.epi, "transliterate", return_value="a"), patch.object(server.dst, "levenshtein_distance", side_effect=distance) as measured:
+        with patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": entries}), patch.object(server, "REQUESTS", RequestRegistry()), patch.object(server.epi, "transliterate", return_value="a"), patch.object(server.dst, "levenshtein_distance", side_effect=distance) as measured:
             with TestClient(server.app) as client, ThreadPoolExecutor() as pool:
                 pending = pool.submit(client.post, "/retrieve", data={"text": "hello", "request_id": "search"})
                 self.assertTrue(entered.wait(3))
@@ -140,11 +140,31 @@ class ControlTests(unittest.TestCase):
     def test_empty_asr_result_returns_search_failure_before_search(self):
         asr = Mock()
         asr.run_asr.return_value = ("", 0.1)
-        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=10)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server.epi, "transliterate") as search:
+        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=10, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server.epi, "transliterate") as search:
             with TestClient(server.app) as client:
                 response = client.post("/transcribe", files={"audio": ("audio.wav", wav([0] * 160), "audio/wav")})
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()["detail"]["code"], "EMPTY_TRANSCRIPT")
+            search.assert_not_called()
+
+    def test_long_transcript_never_starts_phonetic_search(self):
+        with patch.object(server.epi, "transliterate", return_value="a") as transliterate:
+            with self.assertRaises(ASRServiceError) as raised:
+                server.retrieve_top_k("가" * 20, {}, max_chars=20)
+            self.assertEqual((raised.exception.status, raised.exception.code), (400, "TRANSCRIPT_TOO_LONG"))
+            transliterate.assert_not_called()
+            self.assertEqual(server.retrieve_top_k(" " + "가" * 19 + "\n", {}, max_chars=20), ([], "a"))
+
+    def test_long_asr_result_returns_search_failure_before_search(self):
+        asr = Mock()
+        asr.run_asr.return_value = ("가" * 20, 0.1)
+        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=10, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server.epi, "transliterate") as search:
+            with TestClient(server.app) as client:
+                transcribed = client.post("/transcribe", files={"audio": ("audio.wav", wav([0] * 160), "audio/wav")})
+                retrieved = client.post("/retrieve", data={"text": "가" * 20})
+            for response in (transcribed, retrieved):
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["detail"]["code"], "TRANSCRIPT_TOO_LONG")
             search.assert_not_called()
 
 

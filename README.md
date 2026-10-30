@@ -72,7 +72,8 @@ $env:HF_HOME = Join-Path $PWD '.cache\huggingface'
 
 Useful flags: `--model_path` (default `Qwen/Qwen2.5-Omni-7B`, also `W2A_MODEL`), `--device`,
 `--dtype`, `--quant` (see below), `--max_new_tokens`, `--domains`, `--top_k`, `--repo_root`
-(default `./wake2adapt`),
+(default `./wake2adapt`), `--max_transcript_chars` (default 20; longer transcripts skip DB
+search, see below),
 `--lexicon_csv_dir` (point it at `L2-KPNS/metadata/recording_targets` to use the official
 `{domain}_200.csv` lexicon; without it the 200 entities per domain are rebuilt from the
 `answer` fields in `wake2adapt/L2-KPNS-jsonl/`).
@@ -92,12 +93,12 @@ terminated (with a kill fallback) and HTTP 504 / `ASR_TIMEOUT` is returned; proc
 can add up to approximately two seconds. The failed audio is not automatically retried.
 The model reloads in the background. Calls during another inference or reload return
 HTTP 503 / `ASR_BUSY`; an unavailable model returns `ASR_UNAVAILABLE`. Worker failures
-return `ASR_WORKER_FAILED` and also trigger reload. Startup/reload has a separate
-`--asr_startup_timeout_s` limit (default 300 seconds); failed recovery leaves ASR unavailable
-until the server is restarted. `/health.asr_loaded` reports worker readiness.
+return `ASR_WORKER_FAILED` and also trigger reload. Startup/reload has no time limit, so the
+first run can download the model weights; failed recovery leaves ASR unavailable until the
+server is restarted. `/health.asr_loaded` reports worker readiness.
 
 ```bash
-python server.py --asr_timeout_s 10 --asr_startup_timeout_s 300
+python server.py --asr_timeout_s 10
 python -X utf8 -m unittest discover -s tests -v
 ```
 
@@ -128,7 +129,21 @@ On expiry it stops searching and returns HTTP 504 / `RETRIEVAL_TIMEOUT`, without
 results. An individual transliteration/distance operation must finish before a checkpoint
 can interrupt it. Search cancellation/timeout does
 not restart the GPU model. Empty or whitespace-only transcripts are rejected before
-phonetic search with HTTP 400 / `EMPTY_TRANSCRIPT`.
+phonetic search with HTTP 400 / `EMPTY_TRANSCRIPT`. Transcripts of `--max_transcript_chars`
+(default 20) characters or more, after trimming surrounding whitespace, are rejected the
+same way with HTTP 400 / `TRANSCRIPT_TOO_LONG`; inner spaces count toward the length. The
+check runs for both `/retrieve` and retrieval inside `/transcribe`, so with
+`with_retrieval=false` the long ASR text is still returned and the follow-up `/retrieve`
+fails. The `/transcribe` error response does not include `asr_result`.
+
+```json
+{"detail": {"code": "TRANSCRIPT_TOO_LONG",
+            "message": "DB 검색 실패: ASR 결과가 23자로 너무 깁니다 (20자 미만만 검색합니다)."}}
+```
+
+```bash
+python server.py --max_transcript_chars 20
+```
 
 The study UI does not issue a DB request for an empty ASR result: it immediately shows
 a retrieval failure. Nonempty transcripts get at most two retrieval requests, using the
@@ -191,7 +206,7 @@ the offline pipeline.
 | method | path | what it does |
 | --- | --- | --- |
 | `GET` | `/` | one-page browser UI: upload audio, see ASR + the ranked retrieval table |
-| `GET` | `/health` | model / device / lexicon sizes |
+| `GET` | `/health` | model / device / lexicon sizes / timeouts / `max_transcript_chars` |
 | `GET` | `/lexicon?domain=roads&limit=20` | peek at the entity lexicon and its IPA |
 | `POST` | `/transcribe` | audio -> ASR -> top-k retrieval |
 | `POST` | `/retrieve` | text -> top-k retrieval (no GPU, for debugging the retriever) |

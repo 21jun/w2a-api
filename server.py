@@ -87,8 +87,8 @@ class ServerConfig:
         self.keep_visual = args.keep_visual
         self.keep_audio_output = args.keep_audio_output
         self.asr_timeout_s = args.asr_timeout_s
-        self.asr_startup_timeout_s = args.asr_startup_timeout_s
         self.retrieval_timeout_s = args.retrieval_timeout_s
+        self.max_transcript_chars = args.max_transcript_chars
 
 
 # --------------------------------------------------------------------------------------
@@ -106,6 +106,7 @@ def retrieve_top_k(
     *,
     deadline: Optional[float] = None,
     cancel_event=None,
+    max_chars: Optional[int] = None,
 ) -> Tuple[List[dict], str]:
     """Top-k entities by phoneme-level edit distance against the ASR result."""
     def checkpoint():
@@ -116,6 +117,10 @@ def retrieve_top_k(
     checkpoint()
     if not utterance.strip():
         raise ASRServiceError(400, "EMPTY_TRANSCRIPT", "DB 검색 실패: ASR 결과가 비어 있어 검색할 수 없습니다.")
+    length = len(utterance.strip())
+    if max_chars is not None and length >= max_chars:
+        raise ASRServiceError(400, "TRANSCRIPT_TOO_LONG",
+                              f"DB 검색 실패: ASR 결과가 {length}자로 너무 깁니다 ({max_chars}자 미만만 검색합니다).")
     utterance_ipa = epi.transliterate(utterance)
     checkpoint()
     scored = []
@@ -369,6 +374,7 @@ def health():
         "asr_loaded": ASR is not None and ASR.ready,
         "asr_timeout_s": CFG.asr_timeout_s,
         "retrieval_timeout_s": CFG.retrieval_timeout_s,
+        "max_transcript_chars": CFG.max_transcript_chars,
         "model_path": None if ASR is None else CFG.model_path,
         "device": None if ASR is None else CFG.device,
         "dtype": None if ASR is None else CFG.dtype,
@@ -394,7 +400,7 @@ def retrieve(text: str = Form(...), domain: str = Form("roads"), top_k: Optional
     with REQUESTS.track(request_id) as token:
         hits, text_ipa = retrieve_top_k(text, entity_ipa_for(domain), k=k,
                                       deadline=time.monotonic() + CFG.retrieval_timeout_s,
-                                      cancel_event=token)
+                                      cancel_event=token, max_chars=CFG.max_transcript_chars)
     return {
         "text": text,
         "text_ipa": text_ipa,
@@ -450,6 +456,7 @@ async def _transcribe(audio, domain, top_k, ref_audio, ref_text, with_retrieval,
         hits, asr_ipa = await asyncio.to_thread(
             retrieve_top_k, asr_result, entities, k=k,
             deadline=time.monotonic() + CFG.retrieval_timeout_s, cancel_event=token,
+            max_chars=CFG.max_transcript_chars,
         )
     else:
         hits, asr_ipa = [], ""
@@ -569,10 +576,10 @@ def main():
     p.add_argument("--max_new_tokens", type=int, default=256)
     p.add_argument("--asr_timeout_s", type=float, default=10.0,
                    help="hard deadline per ASR call, excluding model load and retrieval (default: 10 s)")
-    p.add_argument("--asr_startup_timeout_s", type=float, default=300.0,
-                   help="model startup/reload deadline (default: 300 s)")
     p.add_argument("--retrieval_timeout_s", type=float, default=20.0,
                    help="phonetic DB search deadline (default: 20 s)")
+    p.add_argument("--max_transcript_chars", type=int, default=20,
+                   help="skip DB search for transcripts this long or longer (default: 20)")
     p.add_argument("--quant", default="none", choices=["none", "int8", "nf4"],
                    help="bitsandbytes weight quantization; nf4 fits an 11 GB card "
                         "(needs compute capability >= 7.5)")
@@ -586,11 +593,13 @@ def main():
     args = p.parse_args()
     if not math.isfinite(args.retrieval_timeout_s) or args.retrieval_timeout_s <= 0:
         p.error("--retrieval_timeout_s must be finite and greater than zero")
+    if args.max_transcript_chars < 1:
+        p.error("--max_transcript_chars must be at least 1")
 
     CFG = ServerConfig(args)
     LEXICON = load_lexicon(CFG)
     if not CFG.no_asr:
-        ASR = ASRWorker(CFG, CFG.asr_timeout_s, CFG.asr_startup_timeout_s)
+        ASR = ASRWorker(CFG, CFG.asr_timeout_s)
         atexit.register(ASR.close)
         ASR.start()
 

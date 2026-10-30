@@ -49,7 +49,7 @@ class AudioTests(unittest.TestCase):
 
     def test_invalid_target_or_reference_never_calls_asr(self):
         asr = Mock()
-        config = SimpleNamespace(top_k=5, retrieval_timeout_s=30)
+        config = SimpleNamespace(top_k=5, retrieval_timeout_s=30, max_transcript_chars=20)
         with patch.object(server, "ASR", asr), patch.object(server, "CFG", config), patch.object(server, "LEXICON", {"roads": {}}):
             with TestClient(server.app) as client:
                 for files in (
@@ -64,7 +64,7 @@ class AudioTests(unittest.TestCase):
     def test_timeout_returns_504_without_search(self):
         asr = Mock()
         asr.run_asr.side_effect = server.ASRServiceError(504, "ASR_TIMEOUT", "deadline exceeded")
-        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "retrieve_top_k") as search:
+        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "retrieve_top_k") as search:
             with TestClient(server.app) as client:
                 response = client.post("/transcribe", files={"audio": ("silence.wav", wav(np.zeros(1600)), "audio/wav")})
             self.assertEqual(response.status_code, 504)
@@ -75,7 +75,7 @@ class AudioTests(unittest.TestCase):
     def test_valid_request_preserves_response_and_worker_timing(self):
         asr = Mock()
         asr.run_asr.return_value = ("recognized", 0.25)
-        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "retrieve_top_k", return_value=([], "ipa")):
+        with patch.object(server, "ASR", asr), patch.object(server, "CFG", SimpleNamespace(top_k=5, retrieval_timeout_s=30, max_transcript_chars=20)), patch.object(server, "LEXICON", {"roads": {}}), patch.object(server, "retrieve_top_k", return_value=([], "ipa")):
             with TestClient(server.app) as client:
                 response = client.post("/transcribe", files={"audio": ("silence.wav", wav(np.zeros(1600)), "audio/wav")})
             self.assertEqual(response.status_code, 200)

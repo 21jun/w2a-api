@@ -54,13 +54,11 @@ def model_worker(connection, config):
 
 
 class ASRWorker:
-    def __init__(self, config, timeout_s=10.0, startup_timeout_s=300.0,
-                 worker_target=model_worker):
-        if not all(math.isfinite(x) and x > 0 for x in (timeout_s, startup_timeout_s)):
-            raise ValueError("ASR timeouts must be finite and greater than zero")
+    def __init__(self, config, timeout_s=10.0, worker_target=model_worker):
+        if not (math.isfinite(timeout_s) and timeout_s > 0):
+            raise ValueError("ASR timeout must be finite and greater than zero")
         self.config = config
         self.timeout_s = timeout_s
-        self.startup_timeout_s = startup_timeout_s
         self.target = worker_target
         self.context = mp.get_context("spawn")
         self.lock = threading.Lock()
@@ -97,8 +95,7 @@ class ASRWorker:
             self.process.start()
             child.close()
             try:
-                if not parent.poll(self.startup_timeout_s):
-                    raise RuntimeError(f"ASR model startup exceeded {self.startup_timeout_s:g} seconds.")
+                # No startup deadline: the first run may download the model weights.
                 status, detail = parent.recv()
             except (EOFError, OSError) as exc:
                 # A native crash or spawn/bootstrap failure cannot send an error message.

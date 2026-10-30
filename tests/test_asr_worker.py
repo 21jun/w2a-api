@@ -16,10 +16,6 @@ def reports_startup_error(connection, config):
     connection.close()
 
 
-def stalled_startup(connection, config):
-    time.sleep(60)
-
-
 def fake_worker(connection, config):
     connection.send(("ready", None))
     try:
@@ -37,7 +33,7 @@ def fake_worker(connection, config):
 
 class WorkerTests(unittest.TestCase):
     def test_startup_error_reaches_parent_and_cleans_up(self):
-        worker = ASRWorker(None, startup_timeout_s=5, worker_target=reports_startup_error)
+        worker = ASRWorker(None, worker_target=reports_startup_error)
         self.addCleanup(worker.close)
         with self.assertRaisesRegex(RuntimeError, "ModuleNotFoundError.*audioread"):
             worker.start()
@@ -46,16 +42,9 @@ class WorkerTests(unittest.TestCase):
         self.assertIsNone(worker.connection)
 
     def test_early_exit_reports_exit_code_instead_of_raw_eof(self):
-        worker = ASRWorker(None, startup_timeout_s=5, worker_target=exits_before_ready)
+        worker = ASRWorker(None, worker_target=exits_before_ready)
         self.addCleanup(worker.close)
         with self.assertRaisesRegex(RuntimeError, "exited before reporting ready.*Exit code: 0"):
-            worker.start()
-        self.assertIsNone(worker.process)
-
-    def test_startup_timeout_remains_distinct(self):
-        worker = ASRWorker(None, startup_timeout_s=0.15, worker_target=stalled_startup)
-        self.addCleanup(worker.close)
-        with self.assertRaisesRegex(RuntimeError, "startup exceeded"):
             worker.start()
         self.assertIsNone(worker.process)
 
@@ -70,7 +59,7 @@ class WorkerTests(unittest.TestCase):
         connection.close.assert_called_once()
 
     def worker(self, timeout=1):
-        worker = ASRWorker(None, timeout, 5, worker_target=fake_worker)
+        worker = ASRWorker(None, timeout, worker_target=fake_worker)
         self.addCleanup(worker.close)
         worker.start()
         return worker
